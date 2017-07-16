@@ -31,7 +31,7 @@ All usable commands for the 'RC'-Interface are aviable after running vlc -I rc
 import sys
 
 if sys.version_info[0] != 3 or sys.version_info[1] < 6:
-    print("This script requires Python version 3.6")
+    print("VLC.PY: This script requires Python version 3.6")
     sys.exit(1)
 
 import socket
@@ -322,8 +322,8 @@ class VLC:
             # |   14 - Titel (00:00:33) [played 1 time]
             splitted = entry.split(' ')
             if splitted[-3] == "[played":
-                if (splitted[-4][0] != '(' or splitted[-4][-1] != ')' or
-                        splitted[-4][3] != ':' or splitted[-4][6] != ':'):
+                if (splitted[-4][0] != '(' or splitted[-4][-1] != ')'
+                        or splitted[-4][3] != ':' or splitted[-4][6] != ':'):
                     try:
                         self._vlc_log("FOUND CORRUPTED ENTRY: %s" % entry)
                         self._vlc_log("DELETING")
@@ -345,8 +345,8 @@ class VLC:
                 }
                 plist.append(new_e)
             else:
-                if (splitted[-1][0] != '(' or splitted[-1][-1] != ')' or
-                        splitted[-1][3] != ':' or splitted[-1][6] != ':'):
+                if (splitted[-1][0] != '(' or splitted[-1][-1] != ')'
+                        or splitted[-1][3] != ':' or splitted[-1][6] != ':'):
                     try:
                         self._vlc_log("FOUND CORRUPTED ENTRY: %s" % entry)
                         self._vlc_log("DELETING")
@@ -381,7 +381,8 @@ class VLC:
         return self._select_interface(self._rc_playlist, self._http_playlist)
 
     def _cache_playlist(self, playlist):
-        if self.cached_playlist != playlist:
+        if not hasattr(self, 'cached_playlist') \
+                       or self.cached_playlist != playlist:
             self.cached_playlist = playlist
         return self.cached_playlist
 
@@ -792,8 +793,7 @@ class VLC:
 
     # TODO: ADD SHUTDOWN!!!
 
-
-# | clean - - - empty the recv buffer
+    # | clean - - - empty the recv buffer
 
     def _rc_clean_buffer(self):
         while True:
