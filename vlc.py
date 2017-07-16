@@ -150,6 +150,8 @@ class VLC:
         The Interfaces can be specified in the <interfaces>-array. There should
             be either 'http' or 'rc' in the <interfaces>-array to connect to.
         Currently using 'http' is highly recommended.
+        If <screen_name> is None, VLC will not start a new player but try to
+            connect to the given http or rc port given in the other parameters.
         """
         # interface http or/and rc allowed
         # http prefered
@@ -176,29 +178,32 @@ class VLC:
             self.HOST = http_host
             self.PORT = http_port
 
-        cmd = subprocess.run(
-            [
-                'screen',
-                '-ls',
-                self.SCREEN_NAME,
-            ], stdout=subprocess.DEVNULL)
-        if cmd.returncode:
-            self._vlc_log("starting vlc-player")
-            startup_commands = [
-                'screen', '-dmS', self.SCREEN_NAME, 'vlc', '--intf',
-                self.INTERFACE, '--extraintf', ','.join(interfaces),
-                '--http-host', http_host, '--http-port',
-                str(http_port), '--http-password', http_password, '--rc-host',
-                '%s:%i' % (rc_host, int(rc_port))
-            ]
+        if screen_name is not None:
+            cmd = subprocess.run(
+                [
+                    'screen',
+                    '-ls',
+                    self.SCREEN_NAME,
+                ],
+                stdout=subprocess.DEVNULL)
+            if cmd.returncode:
+                self._vlc_log("starting vlc-player")
+                startup_commands = [
+                    'screen', '-dmS', self.SCREEN_NAME, 'vlc', '--intf',
+                    self.INTERFACE, '--extraintf', ','.join(interfaces),
+                    '--http-host', http_host, '--http-port',
+                    str(http_port), '--http-password', http_password,
+                    '--rc-host',
+                    '%s:%i' % (rc_host, int(rc_port))
+                ]
 
-            if aout is not None:
-                startup_commands.append('--aout')
-                startup_commands.append(aout)
-            if vout is not None:
-                startup_commands.append('--vout')
-                startup_commands.append(vout)
-            subprocess.run(startup_commands)
+                if aout is not None:
+                    startup_commands.append('--aout')
+                    startup_commands.append(aout)
+                if vout is not None:
+                    startup_commands.append('--vout')
+                    startup_commands.append(vout)
+                subprocess.run(startup_commands)
 
         # AF_INET --> .connect((HOST, PORT))
 
@@ -269,12 +274,12 @@ class VLC:
         """
         self._rc_send('add %s' % mrl)
         # recache playlist
-        self.playlist()
+        self.get_playlist()
 
     def _http_add(self, mrl: MRL):
         """Add <mrl> to playlist and start playback."""
         self._http_request("in_play&input=%s" % mrl)
-        self.playlist()
+        self.get_playlist()
 
     def add(self, mrl: MRL):
         """Add <mrl> to playlist and start playback."""
@@ -284,19 +289,19 @@ class VLC:
 # def _rc_enqueue_path(self, path: str):
 #     for file in iglob(path + '/**/*.mp3', recursive=True):
 #         self._rc_enqueue(file)
-#     self.playlist()
+#     self.get_playlist()
 
 # for fast enqueueing:
 
     def _rc_enqueue(self, mrl: MRL):
         self._rc_send('enqueue %s' % MRL)
         # recache playlist
-        self.playlist()
+        self.get_playlist()
 
     def _http_enqueue(self, mrl: MRL):
         """Add <mrl> to playlist."""
         self._http_request("in_enqueue&input=%s" % mrl)
-        self.playlist()
+        self.get_playlist()
 
     def enqueue(self, mrl: MRL):
         """Add <mrl> to playlist."""
@@ -373,12 +378,15 @@ class VLC:
         return self._http_get("requests/playlist.json").json()
 
     def _http_playlist(self):
+        # playing title is marked with "'current': 'current'"
         full_pl = self._http_full_playlist()
         return self._cache_playlist(full_pl['children'][0]['children'])
 
-    def playlist(self):
+    def get_playlist(self):
         """Get the playlist."""
         return self._select_interface(self._rc_playlist, self._http_playlist)
+
+    playlist = get_playlist
 
     def _cache_playlist(self, playlist):
         if not hasattr(self, 'cached_playlist') \
@@ -395,7 +403,7 @@ class VLC:
          cached playlist available.
         """
         if self.cached_playlist is None:
-            self.playlist()
+            self.get_playlist()
         return self.cached_playlist
 
 # | search [string]  . .  search for items in playlist (or reset search)
@@ -408,7 +416,7 @@ class VLC:
     def _rc_delete(self, id: int):
         self._rc_send('delete %i' % id, buffersize=4096)
         # recache playlist
-        self.playlist()
+        self.get_playlist()
 
     def _http_delete(self, id: int):
         """
@@ -420,7 +428,7 @@ class VLC:
         But it seems to work for me for now.
         """
         self._http_request("pl_delete&id=%i" % id)
-        self.playlist()
+        self.get_playlist()
 
     def delete(self, id: int):
         """Delete item <id> from playlist."""
@@ -433,11 +441,11 @@ class VLC:
 
     def _rc_sort(self, key: str):
         self._rc_send('delete %s' % key, buffersize=64)
-        return self.playlist()
+        return self.get_playlist()
 
     def _http_sort(self, key: str):
         self._http_request("pl_sort&val=%s" % key)
-        return self.playlist()
+        return self.get_playlist()
 
     def sort(self, key: str):
         """Sort playlist by sort mode <key>."""
@@ -476,15 +484,25 @@ class VLC:
 # | sd [sd]  . . . . . . . . . . . . . show services discovery or toggle
 # | play . . . . . . . . . . . . . . . . . . . . . . . . . . play stream
 
-    def _rc_play(self):
-        self._rc_send('play')
+    def _rc_play(self, id=None):
+        if id is None:
+            self._rc_send('play')
+        else:
+            self._rc_send('play %i' % int(id))
 
-    def _http_play(self):
-        self._http_request('pl_play')
+    def _http_play(self, id=None):
+        if id is None:
+            self._http_request('pl_play')
+        else:
+            self._http_request('pl_play&id=%i' % int(id))
 
-    def play(self):
-        """Play last active item."""
-        self._select_interface(self._rc_play, self._http_play)
+    def play(self, id=None):
+        """
+        Play Title with playlist id <id>.
+
+        If <id> is omitted or <id> is None, play last active item.
+        """
+        self._select_interface(self._rc_play, self._http_play, id)
 
 # | stop . . . . . . . . . . . . . . . . . . . . . . . . . . stop stream
 
@@ -529,56 +547,128 @@ class VLC:
 
 # | repeat [on|off]  . . . . . . . . . . . . . .  toggle playlist repeat
 
-    def _rc_repeat(self, repeat: bool):
-        self._rc_send("repeat %s" % ("on" if repeat else "off"))
+    def _rc_repeat(self, repeat: bool=None):
+        if repeat is None:
+            # toggle
+            self._rc_send("repeat")
+        else:
+            # set
+            self._rc_send("repeat %s" % ("on" if repeat else "off"))
 
-    def _http_repeat(self, repeat: bool):
-        if self.status()['repeat'] ^ repeat:
+    def _http_repeat(self, repeat: bool=None):
+        if repeat is None or self._http_get_repeat() ^ repeat:
             # toggle if current status and desired status differ
             self._http_request('pl_repeat')
 
-    def repeat(self, repeat: bool):
-        """Activate/Deactivate repeating."""
+    def repeat(self, repeat: bool=None):
+        """
+        Activate/Deactivate repeating.
+
+        Will start repeating if <repeat> is True
+        Will stop repeating if <repeat> is False
+        Will toggle if <repeat> is omitted or None
+        """
         self._select_interface(self._rc_repeat, self._http_repeat, repeat)
+
+    def _rc_get_repeat(self) -> bool:
+        raise NotImplementedError("_rc_get_repeat is not implemented. " +
+                                  "Use http instead.")
+        # TODO: implement
+        return False
+
+    def _http_get_repeat(self) -> bool:
+        return self._http_status()['repeat']
+
+    def get_repeat(self) -> bool:
+        """Get playlist repeat status."""
+        return self._select_interface(self._rc_get_repeat,
+                                      self._http_get_repeat)
 
 # | loop [on|off]  . . . . . . . . . . . . . . . .  toggle playlist loop
 
-    def _rc_loop(self, loop: bool):
-        self._rc_send("loop %s" % ("on" if loop else "off"))
+    def _rc_loop(self, loop: bool=None):
+        if loop is None:
+            # toggle
+            self._rc_send("loop")
+        else:
+            # set
+            self._rc_send("loop %s" % ("on" if loop else "off"))
 
-    def _http_loop(self, loop: bool):
-        if self.status()['loop'] ^ loop:
+    def _http_loop(self, loop: bool=None):
+        if loop is None or self._http_get_loop() ^ loop:
             # toggle if current status and desired status differ
             self._http_request('pl_loop')
 
-    def loop(self, loop: bool):
-        """Activate/Deactivate looping."""
+    def loop(self, loop: bool=None):
+        """
+        Activate/Deactivate looping playlist.
+
+        Will start looping if <loop> is True
+        Will stop looping if <loop> is False
+        Will toggle if <loop> is omitted or None
+        """
         self._select_interface(self._rc_loop, self._http_loop, loop)
+
+    def _rc_get_loop(self) -> bool:
+        raise NotImplementedError("_rc_get_loop is not implemented. " +
+                                  "Use http instead.")
+        # TODO: implement
+
+    def _http_get_loop(self) -> bool:
+        return self._http_status()['loop']
+
+    def get_loop(self) -> bool:
+        """Get playlist loop status."""
+        return self._select_interface(self._rc_get_loop, self._http_get_loop)
 
 # | random [on|off]  . . . . . . . . . . . . . .  toggle playlist random
 
-    def _rc_random(self, random: bool):
-        self._rc_send("random %s" % ("on" if random else "off"))
+    def _rc_random(self, random: bool=None):
+        if random is None:
+            # toggle
+            self._rc_send("random")
+        else:
+            # set
+            self._rc_send("random %s" % ("on" if random else "off"))
 
-    def _http_random(self, random: bool):
-        if self.status()['random'] ^ random:
+    def _http_random(self, random: bool=None):
+        if random is None or self._http_get_random() ^ random:
             # toggle if current status and desired status differ
             self._http_request('pl_random')
 
-    def random(self, random: bool):
-        """Activate/Deactivate random playback."""
+    def random(self, random: bool=None):
+        """
+        Activate/Deactivate  random playback.
+
+        Will start random playback if <random> is True
+        Will stop random playback if <random> is False
+        Will toggle if <random> is omitted or None
+        """
         self._select_interface(self._rc_random, self._http_random, random)
+
+    def _rc_get_random(self) -> bool:
+        raise NotImplementedError("_rc_get_random is not implemented. " +
+                                  "Use http instead.")
+        # TODO: implement
+
+    def _http_get_random(self) -> bool:
+        return self._http_status()['random']
+
+    def get_random(self) -> bool:
+        """Get playlist loop status."""
+        return self._select_interface(self._rc_get_random,
+                                      self._http_get_random)
 
 # | clear  . . . . . . . . . . . . . . . . . . . . .  clear the playlist
 
     def _rc_clear(self):
         self._rc_send('clear')
         # recache playlist
-        self.playlist()
+        self.get_playlist()
 
     def _http_empty(self):
         self._http_request('pl_empty')
-        self.playlist()
+        self.get_playlist()
 
     def clear(self):
         """Empty the playlist."""
@@ -624,15 +714,25 @@ class VLC:
 
 # | pause  . . . . . . . . . . . . . . . . . . . . . . . .  toggle pause
 
-    def _rc_pause(self):
-        self.x('pause')
+    def _rc_pause(self, id=None):
+        if id is None:
+            self._rc_send('pause')
+        else:
+            self._rc_send('pause %i' % int(id))
 
-    def _http_pause(self):
-        self._http_request('pl_pause')
+    def _http_pause(self, id=None):
+        if id is None:
+            self._http_request('pl_pause')
+        else:
+            self._http_request('pl_pause&id=%i' % int(id))
 
-    def pause(self):
-        """Pause playing title."""
-        self._select_interface(self._rc_pause, self._http_pause)
+    def pause(self, id=None):
+        """
+        Pause and jump to title with playlist id <id>.
+
+        If <id> is omitted or <id> is None, pause last active item.
+        """
+        self._select_interface(self._rc_pause, self._http_pause, id)
 
 # | fastforward  . . . . . . . . . . . . . . . . . . set to maximum rate
 # | rewind . . . . . . . . . . . . . . . . . . . . . set to minimum rate
@@ -678,6 +778,45 @@ class VLC:
     position = get_position
 
     # | is_playing . . . . . . . . . . . .  1 if a stream plays, 0 otherwise
+
+    def _rc_is_playing(self) -> bool:
+        return (int(self._rc_get('is_playing', buffersize=255)) > 0)
+
+    def _http_is_playing(self) -> bool:
+        return (self._http_status()['state'] == 'playing')
+
+    def is_playing(self) -> bool:
+        """Get playing status."""
+        return self._select_interface(self._rc_is_playing,
+                                      self._http_is_playing)
+
+    def _rc_is_stopped(self) -> bool:
+        raise NotImplementedError("_rc_is_stopped is not implemented. " +
+                                  "Use http instead.")
+        # TODO: implement
+        return False
+
+    def _http_is_stopped(self) -> bool:
+        return (self._http_status()['state'] == 'stopped')
+
+    def is_stopped(self) -> bool:
+        """Get playing status."""
+        return self._select_interface(self._rc_is_stopped,
+                                      self._http_is_stopped)
+
+    def _rc_is_paused(self) -> bool:
+        raise NotImplementedError("_rc_is_paused is not implemented. " +
+                                  "Use http instead.")
+        # TODO: implement
+        return False
+
+    def _http_is_paused(self) -> bool:
+        return (self._http_status()['state'] == 'paused')
+
+    def is_paused(self) -> bool:
+        """Get playing status."""
+        return self._select_interface(self._rc_is_paused, self._http_is_paused)
+
     # | get_title  . . . . . . . . . . . . . the title of the current stream
 
     def _rc_get_title(self):
@@ -710,12 +849,14 @@ class VLC:
     def _http_get_length(self):
         return self._http_request('').json()['length']
 
-    def length(self):
+    def get_length(self):
         """Get the length of playing title in seconds."""
         return self._select_interface(self._rc_get_length,
                                       self._http_get_length)
 
-# | volume [X] . . . . . . . . . . . . . . . . . .  set/get audio volume
+    length = get_length
+
+    # | volume [X] . . . . . . . . . . . . . . . . . .  set/get audio volume
 
     def _rc_get_volume(self) -> int:
         return int(self._rc_get('volume', buffersize=4096))
