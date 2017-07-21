@@ -206,11 +206,11 @@ class VLC:
                 if vout is not None:
                     startup_commands.append('--vout')
                     startup_commands.append(vout)
-                print("UserID: %i"%os.getuid())
+                print("UserID: %i" % os.getuid())
                 if os.getuid() == 0:
                     self._vlc_log("Please run vlc-player in unser mode before"
                                   + " calling this script:")
-                    print("RUN AS USER: "+" ".join(startup_commands))
+                    print("RUN AS USER: " + " ".join(startup_commands))
                     quit(1)
                 else:
                     self._vlc_log("starting vlc-player")
