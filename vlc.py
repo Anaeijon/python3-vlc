@@ -34,6 +34,7 @@ if sys.version_info[0] != 3 or sys.version_info[1] < 6:
     print("VLC.PY: This script requires Python version 3.6")
     sys.exit(1)
 
+import os
 import socket
 import requests
 import subprocess
@@ -186,34 +187,50 @@ class VLC:
                     self.SCREEN_NAME,
                 ],
                 stdout=subprocess.DEVNULL)
+            print("screen %s found: %i" % (self.SCREEN_NAME, cmd.returncode))
             if cmd.returncode:
-                self._vlc_log("starting vlc-player")
                 startup_commands = [
                     'screen', '-dmS', self.SCREEN_NAME, 'vlc', '--intf',
-                    self.INTERFACE, '--extraintf', ','.join(interfaces),
-                    '--http-host', http_host, '--http-port',
+                    self.INTERFACE, '--http-host', http_host, '--http-port',
                     str(http_port), '--http-password', http_password,
                     '--rc-host',
                     '%s:%i' % (rc_host, int(rc_port))
                 ]
-
+                if interfaces:
+                    # adding additional interfaces
+                    startup_commands.append('--extraintf')
+                    startup_commands.append(','.join(interfaces))
                 if aout is not None:
                     startup_commands.append('--aout')
                     startup_commands.append(aout)
                 if vout is not None:
                     startup_commands.append('--vout')
                     startup_commands.append(vout)
-                subprocess.run(startup_commands)
+                print("UserID: %i"%os.getuid())
+                if os.getuid() == 0:
+                    self._vlc_log("Please run vlc-player in unser mode before"
+                                  + " calling this script:")
+                    print("RUN AS USER: "+" ".join(startup_commands))
+                    quit(1)
+                else:
+                    self._vlc_log("starting vlc-player")
+                    subprocess.run(startup_commands)
 
         # AF_INET --> .connect((HOST, PORT))
 
         self.SOCK = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        failcount = 0
         while True:
             try:
                 # retry connecting
                 self.SOCK.connect((self.HOST, self.PORT))
-            except ConnectionRefusedError:
-                continue
+            except ConnectionRefusedError as e:
+                failcount += 1
+                if failcount <= 1000:
+                    continue
+                else:
+                    self._vlc_log("Please run vlc-player manually.")
+                    raise e
             break
         # self.SOCK.settimeout(2)
         # try:
